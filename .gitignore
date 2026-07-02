@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.streamlit/
+kaggle.json
+.env
+
+# Descomentar si el modelo no debe subirse al repositorio.
+# models/*.keras
