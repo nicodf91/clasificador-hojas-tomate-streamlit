@@ -1,9 +1,15 @@
 .venv/
+venv/
 __pycache__/
 *.pyc
-.streamlit/
+.streamlit/secrets.toml
 kaggle.json
 .env
+.env.*
+!.env.example
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Descomentar si el modelo no debe subirse al repositorio.
 # models/*.keras
