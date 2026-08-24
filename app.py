@@ -1,4 +1,7 @@
+import logging
+from io import BytesIO
 from pathlib import Path
+import warnings
 
 import numpy as np
 import streamlit as st
@@ -9,6 +12,11 @@ from tensorflow import keras
 
 MODEL_PATH = Path(__file__).parent / "models" / "modelo_hojas_tomate_mobilenetv2.keras"
 IMAGE_SIZE = (224, 224)
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG"}
+MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_IMAGE_PIXELS = 25_000_000
+
+logger = logging.getLogger(__name__)
 
 CLASSES = [
     ("Tomato___healthy", "Hoja sana"),
@@ -24,12 +32,36 @@ def load_tomato_model():
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"No se encontro el modelo en: {MODEL_PATH}")
 
-    return keras.models.load_model(MODEL_PATH)
+    return keras.models.load_model(MODEL_PATH, compile=False)
+
+
+class ImageValidationError(ValueError):
+    """Indica que un archivo no cumple los limites de entrada de la app."""
 
 
 def read_image(image_file):
-    """Lee la imagen subida o tomada con camara y la convierte a RGB."""
-    return Image.open(image_file).convert("RGB")
+    """Valida una imagen JPEG/PNG acotada y devuelve una copia RGB."""
+    raw_bytes = image_file.getvalue()
+    if len(raw_bytes) > MAX_FILE_BYTES:
+        raise ImageValidationError("La imagen supera el limite de 10 MB.")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(BytesIO(raw_bytes), formats=("JPEG", "PNG")) as candidate:
+            if candidate.format not in ALLOWED_IMAGE_FORMATS:
+                raise ImageValidationError("El archivo no es una imagen JPEG o PNG valida.")
+
+            width, height = candidate.size
+            if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+                raise ImageValidationError(
+                    "La imagen supera el limite de 25 megapixeles."
+                )
+
+            candidate.verify()
+
+        with Image.open(BytesIO(raw_bytes), formats=("JPEG", "PNG")) as candidate:
+            candidate.load()
+            return candidate.convert("RGB").copy()
 
 
 def prepare_image(image):
@@ -103,9 +135,15 @@ image = None
 if image_file is not None:
     try:
         image = read_image(image_file)
-        st.image(image, caption="Vista previa", use_container_width=True)
-    except UnidentifiedImageError:
-        st.error("No se pudo leer la imagen. Proba con un archivo JPG o PNG valido.")
+        st.image(image, caption="Vista previa", width="stretch")
+    except (
+        ImageValidationError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+    ) as error:
+        st.error(str(error) or "No se pudo leer una imagen JPEG o PNG valida.")
 
 if st.button("Clasificar imagen"):
     if image is None:
@@ -117,9 +155,9 @@ if st.button("Clasificar imagen"):
         (technical_name, friendly_name), confidence, probabilities = classify_image(
             model, image
         )
-    except Exception as error:
+    except Exception:
+        logger.exception("Fallo la clasificacion de una imagen")
         st.error("No se pudo clasificar la imagen.")
-        st.caption(str(error))
         st.stop()
 
     st.subheader("Resultado principal")
